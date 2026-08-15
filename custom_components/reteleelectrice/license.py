@@ -43,7 +43,7 @@ USE_LICENSE = False
 # ─────────────────────────────────────────────
 LICENSE_API_URL = "https://api.hubinteligent.org/license/v1"
 
-STORAGE_KEY = "reteleelectrice_license"
+STORAGE_KEY = "reteleelectrice_nolicense"
 STORAGE_VERSION = 1
 
 # Salt intern pentru fingerprint (face reverse-engineering mai greu)
@@ -51,7 +51,7 @@ _FP_SALT = "r3T_eL$cTr1c3_Ha$h_2026!zQ"
 
 # Identificator integrare — trimis la server în fiecare request
 # Serverul folosește acest câmp pentru a separa licențele per integrare
-INTEGRATION = "reteleelectrice"
+INTEGRATION = "reteleelectrice_nolicense"
 
 # ─────────────────────────────────────────────
 # Cheia publică Ed25519 a serverului

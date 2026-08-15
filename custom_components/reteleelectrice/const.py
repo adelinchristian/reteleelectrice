@@ -5,7 +5,7 @@ from typing import Final
 # ──────────────────────────────────────────────
 # Domeniu & configurare implicită
 # ──────────────────────────────────────────────
-DOMAIN = "reteleelectrice"
+DOMAIN = "reteleelectrice_nolicense"
 DEFAULT_UPDATE = 3600  # secunde (1 oră)
 ATTRIBUTION = "Date furnizate de Rețele Electrice România"
 

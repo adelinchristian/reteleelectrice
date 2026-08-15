@@ -1,6 +1,6 @@
 {
-  "domain": "reteleelectrice",
-  "name": "Rețele Electrice",
+  "domain": "reteleelectrice_nolicense",
+  "name": "Rețele Electrice (no license)",
   "codeowners": [
     "@cnecrea"
   ],
