@@ -262,11 +262,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ReteleElectriceConfigEnt
 
         # ── Verificare inițială notificări expirare licență/trial ──
         _update_license_notifications(hass, license_mgr)
-        else:
-            _LOGGER.debug(
-                "[ReteleElectrice] LicenseManager există deja (entry suplimentară)"
-            )
-
+        
     else:
         _LOGGER.debug(
             "[ReteleElectrice] LicenseManager există deja (entry suplimentară)"
