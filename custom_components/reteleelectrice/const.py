@@ -4,6 +4,7 @@ from typing import Final
 
 # ──────────────────────────────────────────────
 # Domeniu & configurare implicită
+# Verificarea licenței este dezactivată prin USE_LICENSE = False.
 # ──────────────────────────────────────────────
 DOMAIN = "reteleelectrice_nolicense"
 DEFAULT_UPDATE = 3600  # secunde (1 oră)

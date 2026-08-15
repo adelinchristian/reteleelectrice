@@ -98,17 +98,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ReteleElectriceConfigEnt
         # event loop-ul. Fără această ordine, alte entry-uri concurente ar vedea
         # LICENSE_DATA_KEY ca lipsă și ar crea câte un LicenseManager duplicat.
         hass.data[DOMAIN][LICENSE_DATA_KEY] = license_mgr
-        await license_mgr.async_load()
-        _LOGGER.debug(
-            "[ReteleElectrice] LicenseManager: status=%s, valid=%s, fingerprint=%s...",
-            license_mgr.status,
-            license_mgr.is_valid,
-            license_mgr.fingerprint[:16],
-        )
+
+        from .license import USE_LICENSE
+        if USE_LICENSE:
+            await license_mgr.async_load()
+            _LOGGER.debug(
+                "[ReteleElectrice] LicenseManager: status=%s, valid=%s, fingerprint=%s...",
+                license_mgr.status,
+                license_mgr.is_valid,
+                license_mgr.fingerprint[:16],
+            )
+        else:
+            _LOGGER.info(
+                "[ReteleElectrice] License verification disabled; skipping server check."
+            )
 
         # Heartbeat periodic — intervalul vine de la server (via valid_until)
         from datetime import timedelta
-        from .license import USE_LICENSE
 
         from homeassistant.helpers.event import (
             async_track_point_in_time,

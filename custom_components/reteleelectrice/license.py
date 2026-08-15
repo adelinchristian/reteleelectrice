@@ -50,7 +50,8 @@ STORAGE_VERSION = 1
 _FP_SALT = "r3T_eL$cTr1c3_Ha$h_2026!zQ"
 
 # Identificator integrare — trimis la server în fiecare request
-# Serverul folosește acest câmp pentru a separa licențele per integrare
+# Pentru aplicația separată de tip no-license, rămâne identificatorul propriu.
+# În modul fără licență, cererile către server nu sunt trimise deloc.
 INTEGRATION = "reteleelectrice_nolicense"
 
 # ─────────────────────────────────────────────
@@ -146,6 +147,15 @@ class LicenseManager:
     async def async_load(self) -> None:
         """Încarcă datele de licență din storage. Se apelează o singură dată."""
         _LOGGER.debug("[ReteleElectrice:License] Încep async_load()")
+
+        if not USE_LICENSE:
+            _LOGGER.info(
+                "[ReteleElectrice:License] Verificarea licențelor este dezactivată "
+                "(USE_LICENSE=False) — se ignoră orice contact către /check."
+            )
+            self._loaded = True
+            return
+
         try:
             stored = await self._store.async_load()
             self._data = dict(stored) if stored else {}
@@ -353,6 +363,12 @@ class LicenseManager:
         Dacă există un token cached valid (valid_until > now), îl folosește.
         Altfel, face request la server.
         """
+        if not USE_LICENSE:
+            _LOGGER.debug(
+                "[ReteleElectrice:License] Skip /check because USE_LICENSE=False"
+            )
+            return self._status_token
+
         # Verifică cache-ul local
         if self._is_status_cache_valid():
             _LOGGER.debug(
