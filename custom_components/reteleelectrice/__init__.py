@@ -31,7 +31,9 @@ type ReteleElectriceConfigEntry = ConfigEntry[ReteleElectriceCoordinator]
 
 def _update_license_notifications(hass: HomeAssistant, mgr: LicenseManager) -> None:
     """Creează sau șterge notificările de expirare licență/trial."""
-    if mgr.is_valid:
+    from .license import USE_LICENSE
+    
+    if not USE_LICENSE or mgr.is_valid:
         ir.async_delete_issue(hass, DOMAIN, "trial_expired")
         ir.async_delete_issue(hass, DOMAIN, "license_expired")
         persistent_notification.async_dismiss(hass, "reteleelectrice_license_expired")
@@ -106,6 +108,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ReteleElectriceConfigEnt
 
         # Heartbeat periodic — intervalul vine de la server (via valid_until)
         from datetime import timedelta
+        from .license import USE_LICENSE
 
         from homeassistant.helpers.event import (
             async_track_point_in_time,
@@ -113,142 +116,145 @@ async def async_setup_entry(hass: HomeAssistant, entry: ReteleElectriceConfigEnt
         )
         from homeassistant.util import dt as dt_util
 
-        interval_sec = license_mgr.check_interval_seconds
-        _LOGGER.debug(
-            "[ReteleElectrice] Programez heartbeat periodic la fiecare %d secunde (%d ore)",
-            interval_sec,
-            interval_sec // 3600,
-        )
-
-        async def _heartbeat_periodic(_now) -> None:
-            """Verifică statusul la server dacă cache-ul a expirat."""
-            mgr: LicenseManager | None = hass.data.get(DOMAIN, {}).get(
-                LICENSE_DATA_KEY
+        if USE_LICENSE:
+            interval_sec = license_mgr.check_interval_seconds
+            _LOGGER.debug(
+                "[ReteleElectrice] Programez heartbeat periodic la fiecare %d secunde (%d ore)",
+                interval_sec,
+                interval_sec // 3600,
             )
-            if not mgr:
-                _LOGGER.debug("[ReteleElectrice] Heartbeat: LicenseManager nu există, skip")
-                return
 
-            was_valid = mgr.is_valid
-
-            if mgr.needs_heartbeat:
-                _LOGGER.debug("[ReteleElectrice] Heartbeat: cache expirat, verific la server")
-                await mgr.async_heartbeat()
-
-                now_valid = mgr.is_valid
-
-                if was_valid and not now_valid:
-                    _LOGGER.warning(
-                        "[ReteleElectrice] Licența a devenit invalidă — reîncarc senzorii"
-                    )
-                    _update_license_notifications(hass, mgr)
-                    await mgr._async_reload_entries()
-                elif not was_valid and now_valid:
-                    _LOGGER.info(
-                        "[ReteleElectrice] Licența a redevenit validă — reîncarc senzorii"
-                    )
-                    _update_license_notifications(hass, mgr)
-                    await mgr._async_reload_entries()
-
-                new_interval = mgr.check_interval_seconds
-                _LOGGER.debug(
-                    "[ReteleElectrice] Heartbeat: reprogramez la %d secunde (%d min)",
-                    new_interval,
-                    new_interval // 60,
+            async def _heartbeat_periodic(_now) -> None:
+                """Verifică statusul la server dacă cache-ul a expirat."""
+                mgr: LicenseManager | None = hass.data.get(DOMAIN, {}).get(
+                    LICENSE_DATA_KEY
                 )
-                cancel_old = hass.data.get(DOMAIN, {}).get("_cancel_heartbeat")
-                if cancel_old:
-                    cancel_old()
-                cancel_new = async_track_time_interval(
-                    hass,
-                    _heartbeat_periodic,
-                    timedelta(seconds=new_interval),
-                )
-                hass.data[DOMAIN]["_cancel_heartbeat"] = cancel_new
-            else:
-                _LOGGER.debug("[ReteleElectrice] Heartbeat: cache valid, nu e nevoie de verificare")
-
-        cancel_heartbeat = async_track_time_interval(
-            hass,
-            _heartbeat_periodic,
-            timedelta(seconds=interval_sec),
-        )
-        hass.data[DOMAIN]["_cancel_heartbeat"] = cancel_heartbeat
-        _LOGGER.debug("[ReteleElectrice] Heartbeat programat și stocat în hass.data")
-
-        # ── Timer precis la valid_until (zero gap la expirare cache) ──
-        def _schedule_cache_expiry_check(mgr_ref: LicenseManager) -> None:
-            """Programează un check EXACT la momentul expirării cache-ului."""
-            cancel_prev = hass.data.get(DOMAIN, {}).pop(
-                "_cancel_cache_expiry", None
-            )
-            if cancel_prev:
-                cancel_prev()
-
-            valid_until = (mgr_ref._status_token or {}).get("valid_until")
-            if not valid_until or valid_until <= 0:
-                return
-
-            expiry_dt = dt_util.utc_from_timestamp(valid_until)
-            expiry_dt = expiry_dt + timedelta(seconds=2)
-
-            async def _on_cache_expiry(_now) -> None:
-                """Callback executat EXACT la expirarea cache-ului."""
-                mgr_now: LicenseManager | None = hass.data.get(
-                    DOMAIN, {}
-                ).get(LICENSE_DATA_KEY)
-                if not mgr_now:
+                if not mgr:
+                    _LOGGER.debug("[ReteleElectrice] Heartbeat: LicenseManager nu există, skip")
                     return
 
-                was_valid = mgr_now.is_valid
-                _LOGGER.debug(
-                    "[ReteleElectrice] Cache expirat — verific imediat la server"
-                )
-                await mgr_now.async_check_status()
-                now_valid = mgr_now.is_valid
+                was_valid = mgr.is_valid
 
-                if was_valid != now_valid:
-                    if now_valid:
-                        _LOGGER.info(
-                            "[ReteleElectrice] Licența a redevenit validă — reîncarc"
-                        )
-                    else:
+                if mgr.needs_heartbeat:
+                    _LOGGER.debug("[ReteleElectrice] Heartbeat: cache expirat, verific la server")
+                    await mgr.async_heartbeat()
+
+                    now_valid = mgr.is_valid
+
+                    if was_valid and not now_valid:
                         _LOGGER.warning(
-                            "[ReteleElectrice] Licența a devenit invalidă — reîncarc"
+                            "[ReteleElectrice] Licența a devenit invalidă — reîn c senzorii"
                         )
-                    _update_license_notifications(hass, mgr_now)
-                    await mgr_now._async_reload_entries()
+                        _update_license_notifications(hass, mgr)
+                        await mgr._async_reload_entries()
+                    elif not was_valid and now_valid:
+                        _LOGGER.info(
+                            "[ReteleElectrice] Licența a redevenit validă — reîn c senzorii"
+                        )
+                        _update_license_notifications(hass, mgr)
+                        await mgr._async_reload_entries()
 
-                _schedule_cache_expiry_check(mgr_now)
+                    new_interval = mgr.check_interval_seconds
+                    _LOGGER.debug(
+                        "[ReteleElectrice] Heartbeat: reprogramez la %d secunde (%d min)",
+                        new_interval,
+                        new_interval // 60,
+                    )
+                    cancel_old = hass.data.get(DOMAIN, {}).get("_cancel_heartbeat")
+                    if cancel_old:
+                        cancel_old()
+                    cancel_new = async_track_time_interval(
+                        hass,
+                        _heartbeat_periodic,
+                        timedelta(seconds=new_interval),
+                    )
+                    hass.data[DOMAIN]["_cancel_heartbeat"] = cancel_new
+                else:
+                    _LOGGER.debug("[ReteleElectrice] Heartbeat: cache valid, nu e nevoie de verificare")
 
-            cancel_expiry = async_track_point_in_time(
-                hass, _on_cache_expiry, expiry_dt
+            cancel_heartbeat = async_track_time_interval(
+                hass,
+                _heartbeat_periodic,
+                timedelta(seconds=interval_sec),
             )
-            hass.data[DOMAIN]["_cancel_cache_expiry"] = cancel_expiry
+            hass.data[DOMAIN]["_cancel_heartbeat"] = cancel_heartbeat
+            _LOGGER.debug("[ReteleElectrice] Heartbeat programat și stocat în hass.data")
 
-            _LOGGER.debug(
-                "[ReteleElectrice] Cache expiry timer programat la %s",
-                expiry_dt.isoformat(),
-            )
+            # ── Timer precis la valid_until (zero gap la expirare cache) ──
+            def _schedule_cache_expiry_check(mgr_ref: LicenseManager) -> None:
+                """Programează un check EXACT la momentul expirării cache-ului."""
+                cancel_prev = hass.data.get(DOMAIN, {}).pop(
+                    "_cancel_cache_expiry", None
+                )
+                if cancel_prev:
+                    cancel_prev()
 
-        _schedule_cache_expiry_check(license_mgr)
+                valid_until = (mgr_ref._status_token or {}).get("valid_until")
+                if not valid_until or valid_until <= 0:
+                    return
+
+                expiry_dt = dt_util.utc_from_timestamp(valid_until)
+                expiry_dt = expiry_dt + timedelta(seconds=2)
+
+                async def _on_cache_expiry(_now) -> None:
+                    """Callback executat EXACT la expirarea cache-ului."""
+                    mgr_now: LicenseManager | None = hass.data.get(
+                        DOMAIN, {}
+                    ).get(LICENSE_DATA_KEY)
+                    if not mgr_now:
+                        return
+
+                    was_valid = mgr_now.is_valid
+                    _LOGGER.debug(
+                        "[ReteleElectrice] Cache expirat — verific imediat la server"
+                    )
+                    await mgr_now.async_check_status()
+                    now_valid = mgr_now.is_valid
+
+                    if was_valid != now_valid:
+                        if now_valid:
+                            _LOGGER.info(
+                                "[ReteleElectrice] Licența a redevenit validă — reîn c"
+                            )
+                        else:
+                            _LOGGER.warning(
+                                "[ReteleElectrice] Licența a devenit invalidă — reîn c"
+                            )
+                        _update_license_notifications(hass, mgr_now)
+                        await mgr_now._async_reload_entries()
+
+                    _schedule_cache_expiry_check(mgr_now)
+
+                cancel_expiry = async_track_point_in_time(
+                    hass, _on_cache_expiry, expiry_dt
+                )
+                hass.data[DOMAIN]["_cancel_cache_expiry"] = cancel_expiry
+
+                _LOGGER.debug(
+                    "[ReteleElectrice] Cache expiry timer programat la %s",
+                    expiry_dt.isoformat(),
+                )
+
+            _schedule_cache_expiry_check(license_mgr)
+        else:
+            _LOGGER.info("[ReteleElectrice] License verification disabled (USE_LICENSE = False)")
 
         # ── Notificare re-enable (dacă a fost dezactivată anterior) ──
         was_disabled = hass.data.pop(f"{DOMAIN}_was_disabled", False)
-        if was_disabled:
+        if was_disabled and USE_LICENSE:
             await license_mgr.async_notify_event("integration_enabled")
 
-        if not license_mgr.is_valid:
+        if USE_LICENSE and not license_mgr.is_valid:
             _LOGGER.warning(
                 "[ReteleElectrice] Integrarea nu are licență validă. "
                 "Senzorii vor afișa 'Licență necesară'."
             )
-        elif license_mgr.is_trial_valid:
+        elif USE_LICENSE and license_mgr.is_trial_valid:
             _LOGGER.info(
                 "[ReteleElectrice] Perioadă de evaluare — %d zile rămase",
                 license_mgr.trial_days_remaining,
             )
-        else:
+        elif USE_LICENSE:
             _LOGGER.info(
                 "[ReteleElectrice] Licență activă — tip: %s",
                 license_mgr.license_type,
@@ -256,6 +262,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ReteleElectriceConfigEnt
 
         # ── Verificare inițială notificări expirare licență/trial ──
         _update_license_notifications(hass, license_mgr)
+        else:
+            _LOGGER.debug(
+                "[ReteleElectrice] LicenseManager există deja (entry suplimentară)"
+            )
+
     else:
         _LOGGER.debug(
             "[ReteleElectrice] LicenseManager există deja (entry suplimentară)"

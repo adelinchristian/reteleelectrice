@@ -33,6 +33,12 @@ from .const import DOMAIN
 _LOGGER = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────
+# Global flag to disable license verification
+# Set to False to allow integration to work without a license
+# ─────────────────────────────────────────────
+USE_LICENSE = False
+
+# ─────────────────────────────────────────────
 # Configurare — doar URL-ul serverului
 # ─────────────────────────────────────────────
 LICENSE_API_URL = "https://api.hubinteligent.org/license/v1"
@@ -667,6 +673,10 @@ class LicenseManager:
         2. Perioadă de grație activă (server inaccesibil, dar status era ok) → True
         3. Fallback local: token Ed25519 valid + trial valid → True/False
         """
+        # License verification disabled by global flag
+        if not USE_LICENSE:
+            return True
+
         # 1. Serverul e sursa de adevăr (cache valid)
         if self._status_token and self._is_status_cache_valid():
             server_status = self._status_token.get("status")
