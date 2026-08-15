@@ -94,7 +94,7 @@ def _resolve_selected_pods(
 # ------------------------------------------------------------------
 
 
-class ReteleElectriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+class ReteleElectriceConfigFlow(config_entries.ConfigFlow, domain="reteleelectrice_nolicense"):
     """ConfigFlow — autentificare + selecție POD-uri."""
 
     VERSION = 3
