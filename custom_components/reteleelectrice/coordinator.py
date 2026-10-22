@@ -28,6 +28,24 @@ from .const import DEFAULT_UPDATE, DOMAIN, LICENSE_DATA_KEY
 
 _LOGGER = logging.getLogger(__name__)
 
+# Statusurile cu care api._call_vf_ws_async raportează un apel VF eșuat
+_VF_ERROR_STATUSES = {
+    "error",
+    "vf_page_error",
+    "vf_get_failed",
+    "vf_no_viewstate",
+    "vf_post_error",
+    "vf_post_failed",
+    "a4j_no_data_in_response",
+}
+
+
+def _vf_failed(result: Any) -> bool:
+    """Rezultat VF lipsă sau eroare raportată de proxy-ul Visualforce."""
+    if result is None:
+        return True
+    return isinstance(result, dict) and result.get("status") in _VF_ERROR_STATUSES
+
 type ReteleElectriceConfigEntry = ConfigEntry["ReteleElectriceCoordinator"]
 
 
@@ -145,39 +163,65 @@ class ReteleElectriceCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             instant_values: dict[str, Any] = {}
             supplier_data: dict[str, Any] = {}
 
+            prev = self.data or {}
+
+            def _sau_anterior(bucket: str, pod_name: str, value: Any) -> Any:
+                """Un apel eșuat acum nu înlocuiește datele bune cu o eroare."""
+                if _vf_failed(value):
+                    old = (prev.get(bucket) or {}).get(pod_name)
+                    if old is not None and not _vf_failed(old):
+                        _LOGGER.debug(
+                            "[ReteleElectrice] %s/%s indisponibil — păstrez datele anterioare",
+                            bucket, pod_name,
+                        )
+                        return old
+                return value
+
             for pod in filtered_pods:
                 pod_name = pod.get("Name") or pod.get("POD__c", "")
                 if not pod_name:
                     continue
 
                 # Detalii POD (Aura)
-                pod_details[pod_name] = await self.api.async_get_pod_details(pod_name)
+                pod_details[pod_name] = _sau_anterior(
+                    "pod_details", pod_name, await self.api.async_get_pod_details(pod_name)
+                )
 
                 # Detalii citire POD
-                pod_reading_details[pod_name] = await self.api.async_get_reading_archive_pod_details(pod_name)
+                pod_reading_details[pod_name] = _sau_anterior(
+                    "pod_reading_details", pod_name,
+                    await self.api.async_get_reading_archive_pod_details(pod_name),
+                )
 
                 # Istoric citiri (VF — RetriveSingleSelf)
-                reading_archive[pod_name] = await self.api.async_get_reading_archive(
-                    pod_name, cnp=cnp
+                reading_archive[pod_name] = _sau_anterior(
+                    "reading_archive", pod_name,
+                    await self.api.async_get_reading_archive(pod_name, cnp=cnp),
                 )
 
                 # Întreruperi (VF — PowerOutages)
-                power_outages[pod_name] = await self.api.async_get_power_outages(pod_name)
+                power_outages[pod_name] = _sau_anterior(
+                    "power_outages", pod_name, await self.api.async_get_power_outages(pod_name)
+                )
 
                 # Smart meter (VF — FindOutMeterHistoryData)
                 is_smart = pod.get("Smart_meter__c", False) or pod.get("IsSmartMeter__c", False)
                 if is_smart:
-                    smart_meter[pod_name] = await self.api.async_get_smart_meter_data(
-                        pod_name, cnp=cnp
+                    smart_meter[pod_name] = _sau_anterior(
+                        "smart_meter", pod_name,
+                        await self.api.async_get_smart_meter_data(pod_name, cnp=cnp),
                     )
 
                     # Valoare instantanee (VF — ReqMeterInstantData + FindOutMeterInstantData)
-                    instant_values[pod_name] = await self.api.async_get_instant_values(
-                        pod_name, cnp=cnp
+                    instant_values[pod_name] = _sau_anterior(
+                        "instant_values", pod_name,
+                        await self.api.async_get_instant_values(pod_name, cnp=cnp),
                     )
 
                 # Date furnizor (VF — queryPOD)
-                supplier_data[pod_name] = await self.api.async_get_supplier_data(pod_name)
+                supplier_data[pod_name] = _sau_anterior(
+                    "supplier_data", pod_name, await self.api.async_get_supplier_data(pod_name)
+                )
 
         except UpdateFailed:
             raise

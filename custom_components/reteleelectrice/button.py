@@ -10,12 +10,13 @@ import logging
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import ATTRIBUTION, DOMAIN, LICENSE_DATA_KEY
-from .coordinator import ReteleElectriceCoordinator
+from .coordinator import ReteleElectriceCoordinator, _vf_failed
 from .helpers import build_pod_address
 
 _LOGGER = logging.getLogger(__name__)
@@ -34,7 +35,9 @@ async def async_setup_entry(
         return
 
     pods = coordinator.data.get("pods", [])
-    selected = coordinator.data.get("selected_pods", [])
+    # None / listă goală = toate POD-urile (înainte: `pod in None` → TypeError
+    # și platforma de butoane nu se mai încărca)
+    selected = coordinator.data.get("selected_pods") or []
     account_name = ""
     account = coordinator.data.get("account_info")
     if account and isinstance(account, dict):
@@ -44,7 +47,7 @@ async def async_setup_entry(
 
     for pod in pods:
         pod_name = pod.get("Name") or pod.get("POD__c", "")
-        if not pod_name or pod_name not in selected:
+        if not pod_name or (selected and pod_name not in selected):
             continue
 
         is_smart = pod.get("Smart_meter__c", False) or pod.get(
@@ -115,13 +118,15 @@ class ActualizareInstantaneeButton(
         return mgr is not None and mgr.is_valid
 
     async def async_press(self) -> None:
-        """Acțiune la apăsarea butonului: forțează actualizare valori instantanee."""
+        """Forțează actualizarea valorilor instantanee.
+
+        Orice eșec ridică HomeAssistantError → mesajul apare în interfață
+        (înainte erorile ajungeau doar în log).
+        """
         if not self._is_license_valid():
-            _LOGGER.warning(
-                "[ReteleElectrice] Buton blocat: licența nu este validă (POD %s)",
-                self._pod_name,
+            raise HomeAssistantError(
+                f"Licența nu este validă — actualizarea instantanee e blocată (POD {self._pod_name})."
             )
-            return
 
         _LOGGER.info(
             "[ReteleElectrice] Buton apăsat: actualizare instantanee pentru POD %s",
@@ -130,7 +135,7 @@ class ActualizareInstantaneeButton(
 
         # Obținem CNP din datele contului
         cnp = ""
-        account = self.coordinator.data.get("account_info")
+        account = (self.coordinator.data or {}).get("account_info")
         if account and isinstance(account, dict):
             cnp = account.get("CNP__c", "") or account.get("Fiscal_Code__c", "")
 
@@ -138,26 +143,26 @@ class ActualizareInstantaneeButton(
             result = await self.coordinator.api.async_get_instant_values(
                 self._pod_name, cnp=cnp
             )
-
-            # Actualizăm datele din coordinator
-            if self.coordinator.data and result:
-                instant = self.coordinator.data.get("instant_values", {})
-                instant[self._pod_name] = result
-                self.coordinator.data["instant_values"] = instant
-
-                # Notificăm toate entitățile să se actualizeze
-                self.coordinator.async_set_updated_data(self.coordinator.data)
-
-                _LOGGER.debug(
-                    "[ReteleElectrice] Valori instantanee actualizate cu succes pentru POD %s",
-                    self._pod_name,
-                )
         except Exception as err:
-            _LOGGER.error(
-                "[ReteleElectrice] Eroare la actualizarea valorilor instantanee pentru POD %s: %s",
-                self._pod_name,
-                err,
+            raise HomeAssistantError(
+                f"Eroare la actualizarea valorilor instantanee (POD {self._pod_name}): {err}"
+            ) from err
+
+        if _vf_failed(result):
+            # Înainte răspunsul de eroare înlocuia valorile bune afișate de senzori
+            raise HomeAssistantError(
+                f"Portalul Rețele Electrice nu a returnat valori instantanee "
+                f"pentru POD {self._pod_name}. Încercați din nou mai târziu."
             )
+
+        # Actualizăm datele din coordinator (copie — nu modificăm datele în loc)
+        data = dict(self.coordinator.data or {})
+        data["instant_values"] = {**(data.get("instant_values") or {}), self._pod_name: result}
+        self.coordinator.async_set_updated_data(data)
+        _LOGGER.debug(
+            "[ReteleElectrice] Valori instantanee actualizate cu succes pentru POD %s",
+            self._pod_name,
+        )
 
     @property
     def extra_state_attributes(self) -> dict:

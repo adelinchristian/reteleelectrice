@@ -29,10 +29,38 @@ from homeassistant.helpers.selector import (
 )
 
 from .api import ReteleElectriceAPI
-from .const import CONF_LICENSE_KEY, DEFAULT_UPDATE, DOMAIN, LICENSE_DATA_KEY, LICENSE_PURCHASE_URL
+from .const import (
+    CONF_LICENSE_KEY,
+    DEFAULT_UPDATE,
+    DOMAIN,
+    LICENSE_DATA_KEY,
+    LICENSE_PURCHASE_URL,
+    MAX_UPDATE,
+    MIN_UPDATE,
+)
 from .helpers import build_pod_address, normalize_title
 
 _LOGGER = logging.getLogger(__name__)
+
+# Interval de actualizare valid (înainte: orice număr, inclusiv 0). Fiecare
+# actualizare face zeci de cereri către portal (login + pagini Visualforce).
+_INTERVAL = vol.All(vol.Coerce(int), vol.Range(min=MIN_UPDATE, max=MAX_UPDATE))
+
+_ETICHETE_TIP_LICENTA = {
+    # Tipurile emise de WebAPI (LICENSE_DURATION)
+    "perpetual": ("perpetuă", "perpetual"),
+    "annual": ("anuală", "annual"),
+    "semi_annual": ("semestrială", "semi-annual"),
+    "monthly": ("lunară", "monthly"),
+}
+
+
+def _eticheta_tip_licenta(tip: str | None, is_ro: bool) -> str:
+    """Eticheta afișată pentru tipul de licență primit de la server."""
+    if not tip:
+        return "necunoscut" if is_ro else "unknown"
+    ro, en = _ETICHETE_TIP_LICENTA.get(tip, (tip, tip))
+    return ro if is_ro else en
 
 
 # ------------------------------------------------------------------
@@ -145,7 +173,7 @@ class ReteleElectriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required("password"): str,
                 vol.Optional(
                     "update_interval", default=DEFAULT_UPDATE
-                ): int,
+                ): _INTERVAL,
             }
         )
 
@@ -258,7 +286,16 @@ class ReteleElectriceOptionsFlow(config_entries.OptionsFlow):
                 self.hass, username=username, password=password
             )
 
-            if await api.async_login():
+            conflict = any(
+                e.entry_id != self.config_entry.entry_id
+                and e.unique_id == username.lower()
+                for e in self.hass.config_entries.async_entries(DOMAIN)
+            )
+            if conflict:
+                # Contul e deja configurat într-o altă intrare
+                await api.async_close()
+                errors["base"] = "already_configured"
+            elif await api.async_login():
                 pods_raw = await api.async_get_pods()
                 await api.async_close()
 
@@ -289,7 +326,7 @@ class ReteleElectriceOptionsFlow(config_entries.OptionsFlow):
                     default=current.get(
                         "update_interval", DEFAULT_UPDATE
                     ),
-                ): int,
+                ): _INTERVAL,
             }
         )
 
@@ -323,13 +360,15 @@ class ReteleElectriceOptionsFlow(config_entries.OptionsFlow):
                         "select_all": select_all,
                         "selected_pods": final_selection,
                     },
+                    title=f"Rețele Electrice ({self._username})",
+                    unique_id=self._username.lower(),
                 )
 
                 await self.hass.config_entries.async_reload(
                     self.config_entry.entry_id
                 )
 
-                return self.async_create_entry(data={})
+                return self.async_create_entry(data=dict(self.config_entry.options))
 
         current = self.config_entry.data
 
@@ -386,7 +425,7 @@ class ReteleElectriceOptionsFlow(config_entries.OptionsFlow):
         if server_status == "licensed":
             from datetime import datetime
 
-            tip = mgr.license_type or "necunoscut"
+            tip = _eticheta_tip_licenta(mgr.license_type, True)
             status_lines = [f"✅ Licență activă ({tip})"]
 
             if mgr.license_key_masked:
@@ -403,7 +442,7 @@ class ReteleElectriceOptionsFlow(config_entries.OptionsFlow):
                     mgr.license_expires_at
                 ).strftime("%d.%m.%Y %H:%M")
                 status_lines.append(f"📅 Expiră la: {exp_date}")
-            elif tip == "perpetual":
+            elif mgr.license_type == "perpetual":
                 status_lines.append("Valabilitate: nelimitată (perpetuă)")
 
             description_placeholders["license_status"] = "\n".join(
@@ -484,15 +523,7 @@ class ReteleElectriceOptionsFlow(config_entries.OptionsFlow):
                         persistent_notification,
                     )
 
-                    _LICENSE_TYPE_RO = {
-                        "monthly": "lunară",
-                        "yearly": "anuală",
-                        "perpetual": "perpetuă",
-                        "trial": "evaluare",
-                    }
-                    tip_ro = _LICENSE_TYPE_RO.get(
-                        mgr.license_type, mgr.license_type or "necunoscut"
-                    )
+                    tip_ro = _eticheta_tip_licenta(mgr.license_type, True)
 
                     persistent_notification.async_create(
                         self.hass,
@@ -506,14 +537,16 @@ class ReteleElectriceOptionsFlow(config_entries.OptionsFlow):
                     )
 
                 api_error = result.get("error", "unknown_error")
+                # Codurile WebAPI /activate + erorile locale
                 error_map = {
                     "invalid_key": "license_key_invalid",
                     "already_used": "license_already_used",
                     "expired_key": "license_key_expired",
                     "fingerprint_mismatch": "license_fingerprint_mismatch",
-                    "invalid_signature": "license_server_error",
                     "network_error": "license_network_error",
-                    "server_error": "license_server_error",
+                    "http_502": "license_network_error",
+                    "http_503": "license_network_error",  # server temporar ocupat
+                    "http_504": "license_network_error",
                 }
                 errors["base"] = error_map.get(api_error, "license_server_error")
 

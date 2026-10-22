@@ -7,6 +7,8 @@ from typing import Final
 # ──────────────────────────────────────────────
 DOMAIN = "reteleelectrice"
 DEFAULT_UPDATE = 3600  # secunde (1 oră)
+MIN_UPDATE = 900       # 15 minute (portal web — multe cereri la fiecare actualizare)
+MAX_UPDATE = 86400     # 24 ore
 ATTRIBUTION = "Date furnizate de Rețele Electrice România"
 
 # ──────────────────────────────────────────────

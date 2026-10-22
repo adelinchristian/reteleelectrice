@@ -91,6 +91,11 @@ class ReteleElectriceAPI:
         """Autentificare completă. Returnează True la succes."""
         session = self._get_session()
         self._logged_in = False
+        # Pornim de la zero: cookie-urile unei sesiuni Salesforce expirate pot
+        # strica fluxul de login (înainte doar un reload manual — sesiune HTTP
+        # nouă — rezolva situația).
+        self._cookie_jar.clear()
+        self._aura_token = None
 
         try:
             # --- Pas 1: GET login page ---
@@ -115,7 +120,7 @@ class ReteleElectriceAPI:
 
             # --- Pas 2: Parsează formularul VF ---
             _LOGGER.debug("[ReteleElectrice] Pas 2: Parsez formularul VF...")
-            soup = BeautifulSoup(html, "html.parser")
+            soup = await self._async_soup(html)
 
             viewstate = self._extract_field(soup, "com.salesforce.visualforce.ViewState")
             viewstate_ver = self._extract_field(soup, "com.salesforce.visualforce.ViewStateVersion")
@@ -557,7 +562,7 @@ class ReteleElectriceAPI:
         except Exception as e:
             return {"status": "vf_get_failed", "method": method_name, "error": str(e)}
 
-        soup = BeautifulSoup(html, "html.parser")
+        soup = await self._async_soup(html)
 
         # --- Pas 2: Extrage ViewState ---
         viewstate = self._extract_field(soup, "com.salesforce.visualforce.ViewState")
@@ -644,7 +649,9 @@ class ReteleElectriceAPI:
         )
 
         # --- Pas 6: Parsează A4J response ---
-        result = self._parse_a4j_response(response_text, method_name)
+        result = await self._hass.async_add_executor_job(
+            self._parse_a4j_response, response_text, method_name
+        )
         if result is not None:
             _LOGGER.debug("[ReteleElectrice] A4J: SUCCESS — date obținute pentru %s", method_name)
             return result
@@ -847,6 +854,11 @@ class ReteleElectriceAPI:
     # ===================================================================
     # HELPERS
     # ===================================================================
+
+    async def _async_soup(self, html: str) -> BeautifulSoup:
+        """Parsează HTML în executor — paginile Salesforce sunt mari, iar parsarea
+        în event loop bloca Home Assistant la fiecare actualizare."""
+        return await self._hass.async_add_executor_job(BeautifulSoup, html, "html.parser")
 
     def _extract_aura_token_from_cookies(self) -> Optional[str]:
         """Extrage aura token din cookie-ul __Host-ERIC_PROD*."""
