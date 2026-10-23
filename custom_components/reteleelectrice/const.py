@@ -1,5 +1,6 @@
 """Constante pentru integrarea Rețele Electrice România."""
 
+import os
 from typing import Final
 
 # ──────────────────────────────────────────────
@@ -97,5 +98,13 @@ MONTHS_NUM_RO: dict[str, str] = {
 # ──────────────────────────────────────────────
 CONF_LICENSE_KEY = "license_key"
 LICENSE_DATA_KEY = "reteleelectrice_license_manager"
+
+USE_LICENSE: bool = str(os.environ.get("USE_LICENSE", "false")).strip().lower() not in {
+    "0",
+    "false",
+    "no",
+    "off",
+    "disabled",
+}
 
 LICENSE_PURCHASE_URL: Final = "https://hubinteligent.org/donate?ref=reteleelectrice"

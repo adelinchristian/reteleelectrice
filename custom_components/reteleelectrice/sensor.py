@@ -33,7 +33,7 @@ from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import ATTRIBUTION, DOMAIN, LICENSE_DATA_KEY
+from .const import ATTRIBUTION, DOMAIN, LICENSE_DATA_KEY, USE_LICENSE
 from .coordinator import ReteleElectriceCoordinator
 from .helpers import (
     build_pod_address,
@@ -63,6 +63,8 @@ class PodContext:
 
 def _is_license_valid(hass: HomeAssistant) -> bool:
     """Verifică dacă licența este validă."""
+    if not USE_LICENSE:
+        return True
     mgr = hass.data.get(DOMAIN, {}).get(LICENSE_DATA_KEY)
     return mgr is not None and mgr.is_valid
 

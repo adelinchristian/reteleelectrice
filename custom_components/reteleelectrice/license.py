@@ -27,7 +27,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.storage import Store
 
-from .const import DOMAIN
+from .const import DOMAIN, USE_LICENSE
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -144,6 +144,19 @@ class LicenseManager:
 
     async def async_load(self) -> None:
         """Încarcă datele de licență din storage și verifică statusul la server."""
+        if not USE_LICENSE:
+            _LOGGER.warning(
+                "[ReteleElectrice:License] USE_LICENSE=false — bypass license validation entirely"
+            )
+            now = time.time()
+            self._status_token = {
+                "status": "licensed",
+                "valid_until": now + 365 * 24 * 3600,
+            }
+            self._data["status_token"] = self._status_token
+            self._loaded = True
+            return
+
         try:
             stored = await self._store.async_load()
             self._data = dict(stored) if stored else {}
@@ -553,6 +566,8 @@ class LicenseManager:
     @property
     def is_trial_valid(self) -> bool:
         """Perioada de evaluare e activă (inclusiv grația la server inaccesibil)."""
+        if not USE_LICENSE:
+            return True
         if self._status_token.get("status") != "trial":
             return False
         return self._is_status_cache_valid() or self._is_within_grace_period()
@@ -576,6 +591,8 @@ class LicenseManager:
     @property
     def is_licensed(self) -> bool:
         """Licență activă: token de activare valid local + serverul nu contrazice."""
+        if not USE_LICENSE:
+            return True
         token = self._local_activation_token()
         if token is None:
             return False
@@ -618,6 +635,8 @@ class LicenseManager:
         2. Perioadă de grație (server inaccesibil, ultimul status era ok)
         3. Fallback local: token de activare valid
         """
+        if not USE_LICENSE:
+            return True
         if self._status_token and self._is_status_cache_valid():
             if self._status_token.get("status") in ("licensed", "trial"):
                 return True
@@ -677,6 +696,8 @@ class LicenseManager:
 
         Prioritizează răspunsul serverului; în grație returnează ultimul status bun.
         """
+        if not USE_LICENSE:
+            return "licensed"
         if self._status_token and self._is_status_cache_valid():
             server_status = self._status_token.get("status", "unlicensed")
             if server_status in ("licensed", "trial", "expired"):
@@ -694,6 +715,8 @@ class LicenseManager:
     @property
     def needs_heartbeat(self) -> bool:
         """E timpul pentru o verificare la server (intervalul vine din `valid_until`)."""
+        if not USE_LICENSE:
+            return False
         return not self._is_status_cache_valid()
 
     @property
@@ -705,6 +728,8 @@ class LicenseManager:
           backoff 60s → 5 min → 30 min → 1h, ca să nu bombardăm un server căzut,
           dar nici să lăsăm integrarea blocată ore întregi.
         """
+        if not USE_LICENSE:
+            return 24 * 3600
         valid_until = (self._status_token or {}).get("valid_until", 0)
         remaining = valid_until - time.time()
         if remaining > 0:
